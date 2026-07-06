@@ -4,10 +4,10 @@
   "description": "Browser notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
-  "homepage": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-js",
+  "homepage": "https://github.com/errorgaphq/errorgap-js",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-js.git"
+    "url": "https://github.com/errorgaphq/errorgap-js.git"
   },
   "keywords": ["errorgap", "error-tracking", "browser", "monitoring"],
   "type": "module",
