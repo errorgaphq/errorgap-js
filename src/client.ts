@@ -1,5 +1,6 @@
 import type { Configuration } from "./configuration.js";
 import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js";
+import { enrichBacktrace } from "./source-maps.js";
 import { VERSION } from "./version.js";
 
 export interface DeliveryResult {
@@ -30,14 +31,14 @@ export class Client {
       }
       const err = coerceError(error);
       const notice = buildNotice(err, this.configuration, options);
+      const configuration = this.configuration;
+      const operation = this.prepareAndDeliver(notice, configuration);
+      this.track(operation);
 
       if (options.sync || !this.configuration.async) {
-        const p = this.deliver(notice);
-        this.track(p);
-        return await p;
+        return await operation;
       }
 
-      this.track(this.deliver(notice));
       return { queued: true, status: 202 };
     } catch (exception) {
       this.log(exception);
@@ -45,14 +46,17 @@ export class Client {
     }
   }
 
-  async deliver(notice: NoticePayload): Promise<DeliveryResult> {
-    const url = noticesUrl(this.configuration);
+  async deliver(
+    notice: NoticePayload,
+    configuration: Configuration = this.configuration,
+  ): Promise<DeliveryResult> {
+    const url = noticesUrl(configuration);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "user-agent": `errorgap-browser/${VERSION}`,
     };
-    if (this.configuration.apiKey) {
-      headers["x-errorgap-project-key"] = this.configuration.apiKey;
+    if (configuration.apiKey) {
+      headers["x-errorgap-project-key"] = configuration.apiKey;
     }
 
     try {
@@ -77,6 +81,18 @@ export class Client {
     while (this.pending.size > 0) {
       await Promise.all(Array.from(this.pending));
     }
+  }
+
+  private async prepareAndDeliver(
+    notice: NoticePayload,
+    configuration: Configuration,
+  ): Promise<DeliveryResult> {
+    if (configuration.sourceMaps) {
+      for (const error of notice.errors) {
+        error.backtrace = await enrichBacktrace(error.backtrace);
+      }
+    }
+    return this.deliver(notice, configuration);
   }
 
   private track(promise: Promise<unknown>): void {

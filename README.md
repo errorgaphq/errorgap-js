@@ -5,8 +5,11 @@ errors and unhandled promise rejections, parses cross-browser stack traces,
 and ships notices to an Errorgap server. Includes an opt-in React error
 boundary.
 
-Source maps are out of scope for v1 — the SDK ships raw stack traces; map
-them server-side or via a follow-up release.
+When production source maps are available, the SDK resolves generated frames
+to their original files and sends a bounded source excerpt with each frame.
+This makes application and vendor source immediately available in Errorgap
+without a repository integration. Missing or inaccessible maps gracefully
+fall back to the generated stack trace.
 
 ## Install
 
@@ -89,10 +92,16 @@ export function App() {
 | `environment` | `"production"` | |
 | `release` | — | App version; embedded in payload |
 | `sampleRate` | `1.0` | Drop notices client-side at this rate |
+| `sourceMaps` | `true` | Resolve frames and source excerpts from deployed source maps |
 | `async` | `true` | Fire-and-forget delivery |
 | `logger` | `console` | Pass `null` to silence |
 | `filterKeys` | `["password", "token", "secret", ...]` | Substring, case-insensitive |
 | `captureGlobals` | `true` | Install `error` and `unhandledrejection` listeners |
+
+For source mapping, deploy the bundle's referenced `.map` file and include
+`sourcesContent` in it. The generated script and map must be readable by the
+browser; cross-origin assets therefore need suitable CORS headers. Set
+`sourceMaps: false` to disable runtime map fetching.
 
 ## CORS
 

@@ -2,6 +2,7 @@ import { Configuration, type ConfigurationInput } from "./configuration.js";
 import { Client, type DeliveryResult } from "./client.js";
 import { installGlobalHandlers, uninstallGlobalHandlers } from "./handlers.js";
 import type { NoticeContext } from "./notice.js";
+import { configureRuntime, runtimeState } from "./runtime.js";
 import { VERSION } from "./version.js";
 
 export type { ConfigurationInput, Logger } from "./configuration.js";
@@ -11,9 +12,6 @@ export type { DeliveryResult } from "./client.js";
 export { Configuration } from "./configuration.js";
 export { Client } from "./client.js";
 export { VERSION };
-
-let configuration = new Configuration();
-let client = new Client(configuration);
 
 export interface InitOptions extends ConfigurationInput {
   /**
@@ -25,8 +23,7 @@ export interface InitOptions extends ConfigurationInput {
 
 function init(options: InitOptions = {}): void {
   const { captureGlobals = true, ...rest } = options;
-  configuration = new Configuration(rest);
-  client.configure(configuration);
+  const { client } = configureRuntime(new Configuration(rest));
   if (captureGlobals) {
     installGlobalHandlers(client);
   } else {
@@ -38,19 +35,19 @@ function notify(
   error: unknown,
   options: NoticeContext & { sync?: boolean } = {},
 ): Promise<DeliveryResult> {
-  return client.notify(error, options);
+  return runtimeState().client.notify(error, options);
 }
 
 function flush(): Promise<void> {
-  return client.flush();
+  return runtimeState().client.flush();
 }
 
 function getConfiguration(): Configuration {
-  return configuration;
+  return runtimeState().configuration;
 }
 
 function getClient(): Client {
-  return client;
+  return runtimeState().client;
 }
 
 export const Errorgap = {

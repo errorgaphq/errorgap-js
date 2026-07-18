@@ -14,6 +14,8 @@ export interface ConfigurationInput {
   logger?: Logger | null;
   filterKeys?: string[];
   sampleRate?: number;
+  /** Resolve browser stack frames through deployed source maps. Defaults to true. */
+  sourceMaps?: boolean;
   /**
    * When set, fetched URLs matching this prefix are NOT instrumented
    * for outbound logging. Use it to point the SDK at your own ingest
@@ -43,6 +45,7 @@ export class Configuration {
   logger: Logger | null;
   filterKeys: string[];
   sampleRate: number;
+  sourceMaps: boolean;
   ignoreOrigins: string[];
 
   constructor(input: ConfigurationInput = {}) {
@@ -56,6 +59,7 @@ export class Configuration {
     this.logger = input.logger === undefined ? safeConsole() : input.logger;
     this.filterKeys = input.filterKeys ?? [...DEFAULT_FILTER_KEYS];
     this.sampleRate = clampRate(input.sampleRate);
+    this.sourceMaps = input.sourceMaps ?? true;
     this.ignoreOrigins = input.ignoreOrigins ?? [];
   }
 

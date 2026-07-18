@@ -1,9 +1,16 @@
 export interface BacktraceFrame {
   file?: string;
   line?: number;
+  column?: number;
   function?: string;
   in_app?: boolean;
   index: number;
+  source?: SourceExcerpt;
+}
+
+export interface SourceExcerpt {
+  start_line: number;
+  lines: string[];
 }
 
 const V8_AT = /^\s*at\s+(?:(.*?)\s+\()?(.+?)(?::(\d+))?(?::(\d+))?\)?$/;
@@ -26,10 +33,11 @@ export function parseBacktrace(error: Error): BacktraceFrame[] {
     const match = parseLine(trimmed);
     if (!match) continue;
 
-    const [fnName, location, lineNumber] = match;
+    const [fnName, location, lineNumber, columnNumber] = match;
     frames.push({
       file: stripOrigin(location, origin),
       line: lineNumber,
+      column: columnNumber,
       function: fnName,
       in_app: isInApp(location, origin),
       index: index++,
@@ -39,16 +47,28 @@ export function parseBacktrace(error: Error): BacktraceFrame[] {
   return frames;
 }
 
-function parseLine(line: string): [string | undefined, string, number | undefined] | null {
+function parseLine(
+  line: string,
+): [string | undefined, string, number | undefined, number | undefined] | null {
   if (line.startsWith("at ")) {
     const m = line.match(V8_AT);
     if (!m) return null;
-    return [m[1] || undefined, m[2] ?? "", m[3] ? Number(m[3]) : undefined];
+    return [
+      m[1] || undefined,
+      m[2] ?? "",
+      m[3] ? Number(m[3]) : undefined,
+      m[4] ? Number(m[4]) : undefined,
+    ];
   }
   // Firefox / Safari: function@url:line:col, or just url:line:col
   const m = line.match(SAFARI_AT);
   if (!m) return null;
-  return [m[1] || undefined, m[2] ?? "", m[3] ? Number(m[3]) : undefined];
+  return [
+    m[1] || undefined,
+    m[2] ?? "",
+    m[3] ? Number(m[3]) : undefined,
+    m[4] ? Number(m[4]) : undefined,
+  ];
 }
 
 function stripOrigin(file: string, origin: string): string {

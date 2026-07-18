@@ -20,6 +20,7 @@ describe("parseBacktrace", () => {
     expect(frames.length).toBe(2);
     expect(frames[0]?.function).toBe("handler");
     expect(frames[0]?.line).toBe(42);
+    expect(frames[0]?.column).toBe(10);
     expect(frames[1]?.function).toBeUndefined();
   });
 
@@ -34,6 +35,7 @@ describe("parseBacktrace", () => {
     expect(frames.length).toBe(2);
     expect(frames[0]?.function).toBe("handler");
     expect(frames[0]?.line).toBe(42);
+    expect(frames[0]?.column).toBe(10);
   });
 
   it("strips happy-dom origin from frames when present", () => {

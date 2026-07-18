@@ -71,4 +71,29 @@ describe("ErrorgapBoundary", () => {
 
     errSpy.mockRestore();
   });
+
+  it("shares the configured client across independently loaded entry points", async () => {
+    // Published builds bundle index and react separately. Resetting the module
+    // graph reproduces that duplication and protects the shared runtime state.
+    vi.resetModules();
+    const { ErrorgapBoundary: IndependentlyLoadedBoundary } = await import(
+      "../src/react.js"
+    );
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    render(
+      <IndependentlyLoadedBoundary fallback={<div>fallback</div>}>
+        <Boom />
+      </IndependentlyLoadedBoundary>,
+    );
+
+    await Errorgap.flush();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.body).toMatchObject({
+      context: { source: "react.ErrorgapBoundary" },
+      errors: [{ message: "react-boom" }],
+    });
+
+    errSpy.mockRestore();
+  });
 });

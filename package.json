@@ -1,6 +1,6 @@
 {
   "name": "@errorgap/browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browser notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
@@ -55,5 +55,8 @@
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",
     "vitest": "^1.2.0"
+  },
+  "dependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31"
   }
 }

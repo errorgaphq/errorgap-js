@@ -8,6 +8,11 @@ describe("Configuration", () => {
     expect(config.async).toBe(true);
     expect(config.filterKeys).toContain("password");
     expect(config.sampleRate).toBe(1);
+    expect(config.sourceMaps).toBe(true);
+  });
+
+  it("allows source-map resolution to be disabled", () => {
+    expect(new Configuration({ sourceMaps: false }).sourceMaps).toBe(false);
   });
 
   it("clamps sample rate to [0, 1]", () => {
