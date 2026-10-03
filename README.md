@@ -3,7 +3,8 @@
 Browser notifier for [Errorgap](https://errorgap.com). Captures uncaught
 errors and unhandled promise rejections, parses cross-browser stack traces,
 and ships notices to an Errorgap server. Includes an opt-in React error
-boundary.
+boundary and opt-in browser performance monitoring (page loads, in-app
+navigations, Core Web Vitals and fetch/XHR timings).
 
 When production source maps are available, the SDK resolves generated frames
 to their original files and sends a bounded source excerpt with each frame.
@@ -97,6 +98,7 @@ export function App() {
 | `logger` | `console` | Pass `null` to silence |
 | `filterKeys` | `["password", "token", "secret", ...]` | Substring, case-insensitive |
 | `captureGlobals` | `true` | Install `error` and `unhandledrejection` listeners |
+| `performance` | `false` | `true` or options — see [Performance](#performance) |
 
 For source mapping, deploy the bundle's referenced `.map` file and include
 `sourcesContent` in it. The generated script and map must be readable by the
@@ -108,6 +110,47 @@ browser; cross-origin assets therefore need suitable CORS headers. Set
 The browser sends notices cross-origin, so the Errorgap server must respond
 with `Access-Control-Allow-Origin` permitting your site. The SDK sets
 `credentials: "omit"` so no cookies cross the boundary.
+
+## Performance
+
+Pass `performance` to measure what pages cost the people using them:
+
+```ts
+Errorgap.init({
+  endpoint:    "https://errorgap.example.com",
+  projectSlug: "your-project",
+  apiKey:      "flk_...",
+  release:     __APP_VERSION__,
+  performance: {
+    // Optional: name routes the way your router does. Defaults to
+    // location.pathname, which the server templates (`/orders/123` → `/orders/:id`).
+    routeName: () => router.currentRoute?.path,
+  },
+});
+```
+
+What is measured, per page load (sampled by `sampleRate`):
+
+| Measurement | What it is |
+|---|---|
+| Page load | Time to the load event, time to first byte, DOM ready, first contentful paint |
+| Core Web Vitals | LCP, INP and CLS (via Google's `web-vitals`), reported when the page is hidden |
+| In-app navigations | `pushState`/`popstate` route changes, timed until the next painted frame and until the route's requests finish |
+| API calls | Every `fetch` and `XMLHttpRequest`: method, URL (the path for same-origin calls, origin + path otherwise — the query string is never sent), status (0 when no response) and duration |
+
+Timings are batched and sent every 10 seconds, and with `navigator.sendBeacon`
+when the page is hidden. They appear under **Performance → Browser**.
+
+| Option | Default | Notes |
+|---|---|---|
+| `sampleRate` | `1.0` | Share of page loads measured |
+| `routeName` | `location.pathname` | Returns the current route template |
+| `trackRequests` | `true` | Time fetch and XHR calls |
+| `flushIntervalMs` | `10000` | How often batches are sent |
+
+Requests to the Errorgap endpoint itself and to `ignoreOrigins` prefixes are
+not timed. Beacons cannot set headers, so the final batch carries the
+project key as an `api_key` query parameter; the key is ingest-only.
 
 ## Graceful flush
 
