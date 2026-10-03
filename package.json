@@ -1,6 +1,6 @@
 {
   "name": "@errorgap/browser",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Browser notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
@@ -9,7 +9,12 @@
     "type": "git",
     "url": "https://github.com/errorgaphq/errorgap-js.git"
   },
-  "keywords": ["errorgap", "error-tracking", "browser", "monitoring"],
+  "keywords": [
+    "errorgap",
+    "error-tracking",
+    "browser",
+    "monitoring"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -29,7 +34,11 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
@@ -43,7 +52,9 @@
     "react": ">=16.8"
   },
   "peerDependenciesMeta": {
-    "react": { "optional": true }
+    "react": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@testing-library/react": "^14.2.1",
@@ -57,6 +68,7 @@
     "vitest": "^1.2.0"
   },
   "dependencies": {
-    "@jridgewell/trace-mapping": "^0.3.31"
+    "@jridgewell/trace-mapping": "^0.3.31",
+    "web-vitals": "^6.2.2"
   }
 }
