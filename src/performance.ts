@@ -20,7 +20,17 @@ export interface PerformanceOptions {
   trackRequests?: boolean;
   /** How often buffered timings are sent, in ms. Defaults to 10 000. */
   flushIntervalMs?: number;
+  /**
+   * Other origins (string prefixes or patterns) to send `x-errorgap-trace`
+   * to, so their server SDK links each call to its server trace. Same-origin
+   * calls always get it; a cross-origin API must allow the header in CORS
+   * (`Access-Control-Allow-Headers`) before you list it here.
+   */
+  tracePropagationTargets?: Array<string | RegExp>;
 }
+
+/** The header that carries a timed call's trace id to the server. */
+export const TRACE_HEADER = "x-errorgap-trace";
 
 export interface PageViewTiming {
   kind: "load" | "navigation";
@@ -37,6 +47,8 @@ export interface PageViewTiming {
 }
 
 export interface RequestTiming {
+  /** Sent as `x-errorgap-trace`; the server SDK records it on its transaction. */
+  trace_id?: string;
   page_route: string;
   method: string;
   url: string;
@@ -310,8 +322,10 @@ export class PerformanceMonitor {
       const method = (
         init?.method ?? (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")
       ).toUpperCase();
-      const done = monitor.begin(method, url);
-      return original.call(this, input, init).then(
+      const traceId = monitor.propagates(url) ? newTraceId() : undefined;
+      const done = monitor.begin(method, url, traceId);
+      const traced = traceId ? withTraceHeader(input, init, traceId) : init;
+      return original.call(this, input, traced).then(
         (response) => {
           done(response.status);
           return response;
@@ -346,7 +360,15 @@ export class PerformanceMonitor {
     proto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
       const info = meta.get(this);
       if (info) {
-        const done = monitor.begin(info.method, info.url);
+        const traceId = monitor.propagates(info.url) ? newTraceId() : undefined;
+        if (traceId) {
+          try {
+            this.setRequestHeader(TRACE_HEADER, traceId);
+          } catch {
+            // Not settable here (already sent): time the call untraced.
+          }
+        }
+        const done = monitor.begin(info.method, info.url, traceId);
         this.addEventListener("loadend", () => done(this.status), { once: true });
       }
       return originalSend.call(this, body);
@@ -358,7 +380,7 @@ export class PerformanceMonitor {
   }
 
   /** Track one request; the returned function records its end. */
-  private begin(method: string, absoluteUrl: string): (status: number) => void {
+  private begin(method: string, absoluteUrl: string, traceId?: string): (status: number) => void {
     // The page's own API reads as a path; another origin keeps its host.
     const url = absoluteUrl.startsWith(`${location.origin}/`)
       ? absoluteUrl.slice(location.origin.length)
@@ -377,6 +399,7 @@ export class PerformanceMonitor {
       this.push(
         this.requests,
         {
+          ...(traceId ? { trace_id: traceId } : {}),
           page_route: page,
           method,
           url,
@@ -388,6 +411,14 @@ export class PerformanceMonitor {
       );
       if (this.requests.length >= EARLY_FLUSH_REQUESTS) this.flush(false);
     };
+  }
+
+  /** Send the trace header to this URL? Same-origin, or a listed target. */
+  private propagates(url: string): boolean {
+    if (url.startsWith(`${location.origin}/`)) return true;
+    return (this.options.tracePropagationTargets ?? []).some((target) =>
+      typeof target === "string" ? url.startsWith(target) : target.test(url),
+    );
   }
 
   private ignored(url: string): boolean {
@@ -413,6 +444,30 @@ export class PerformanceMonitor {
   private push<T>(buffer: T[], item: T, max: number): void {
     if (buffer.length < max) buffer.push(item);
   }
+}
+
+/** A random UUID for one call's trace header. */
+function newTraceId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16));
+  hex[12] = "4";
+  hex[16] = ((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
+  const s = hex.join("");
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20)}`;
+}
+
+/**
+ * `init` with the trace header added, keeping every header the caller set —
+ * including those on a `Request` passed as `input`.
+ */
+function withTraceHeader(input: RequestInfo | URL, init: RequestInit | undefined, traceId: string): RequestInit {
+  const base =
+    init?.headers ??
+    (typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined);
+  const headers = new Headers(base);
+  if (!headers.has(TRACE_HEADER)) headers.set(TRACE_HEADER, traceId);
+  return { ...init, headers };
 }
 
 /** Absolute http(s) URL without its query or fragment, or `undefined`. */

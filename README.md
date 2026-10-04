@@ -147,6 +147,17 @@ when the page is hidden. They appear under **Performance → Browser**.
 | `routeName` | `location.pathname` | Returns the current route template |
 | `trackRequests` | `true` | Time fetch and XHR calls |
 | `flushIntervalMs` | `10000` | How often batches are sent |
+| `tracePropagationTargets` | `[]` | Other origins (prefixes or RegExps) that get the trace header; same-origin calls always do |
+
+Each timed same-origin call carries an `x-errorgap-trace` header. A server
+SDK that reads it (Ruby, Laravel, Go, Spring, ASP.NET Core, Node, Python…)
+records it on its transaction, and Errorgap links the browser's view of the
+call to the server trace that answered it. For an API on another origin, list
+it in `tracePropagationTargets` once its CORS policy allows the header:
+
+```ts
+performance: { tracePropagationTargets: ["https://api.example.com"] }
+```
 
 Requests to the Errorgap endpoint itself and to `ignoreOrigins` prefixes are
 not timed. Beacons cannot set headers, so the final batch carries the
