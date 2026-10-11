@@ -37,6 +37,7 @@ describe("global handlers", () => {
       apiKey: "flk_test",
       async: false,
       captureGlobals: true,
+      replay: false,
     });
   });
 

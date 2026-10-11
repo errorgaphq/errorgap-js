@@ -471,7 +471,7 @@ function withTraceHeader(input: RequestInfo | URL, init: RequestInit | undefined
 }
 
 /** Absolute http(s) URL without its query or fragment, or `undefined`. */
-function requestUrl(input: RequestInfo | URL): string | undefined {
+export function requestUrl(input: RequestInfo | URL): string | undefined {
   const raw =
     typeof input === "string"
       ? input
@@ -494,7 +494,7 @@ function absolute(raw: string): string | undefined {
   }
 }
 
-function pathOf(url: string | URL | null | undefined): string {
+export function pathOf(url: string | URL | null | undefined): string {
   if (url == null) return location.pathname;
   try {
     return new URL(String(url), location.href).pathname;

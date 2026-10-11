@@ -99,6 +99,7 @@ export function App() {
 | `filterKeys` | `["password", "token", "secret", ...]` | Substring, case-insensitive |
 | `captureGlobals` | `true` | Install `error` and `unhandledrejection` listeners |
 | `performance` | `false` | `true` or options — see [Performance](#performance) |
+| `replay` | `true` | Follows the project's replay settings; `false` turns it off in this app — see [Session replay](#session-replay) |
 
 For source mapping, deploy the bundle's referenced `.map` file and include
 `sourcesContent` in it. The generated script and map must be readable by the
@@ -162,6 +163,60 @@ performance: { tracePropagationTargets: ["https://api.example.com"] }
 Requests to the Errorgap endpoint itself and to `ignoreOrigins` prefixes are
 not timed. Beacons cannot set headers, so the final batch carries the
 project key as an `api_key` query parameter; the key is ingest-only.
+
+## Session replay
+
+Session replay records a light timeline of what each visitor did and saw,
+shown on error groups and incidents in Errorgap. It is **not video** and never
+records keystrokes:
+
+| Event | Recorded when |
+|---|---|
+| `page_load` | The SDK starts on a page |
+| `navigation` | The path changes (`pushState`, `replaceState`, back/forward) |
+| `api_error` | A `fetch` or XHR call fails or answers 5xx |
+| `error` | An error is reported, linked to its error group |
+| `rage_click` | 5 clicks on the same element within 2 s |
+| `dead_click` | A click on something with a pointer cursor (not a real control) changes nothing within 1 s |
+| `snapshot` | A DOM snapshot is taken (see below) |
+| `exit` | The page is hidden for good |
+
+Whether anything is recorded is set per project in **Settings → Session
+replay**, not in code. The SDK reads those settings once per browser-tab
+session: nothing is recorded while replay is off, and a sampled share of
+sessions is recorded while it is on. A session ends after 30 minutes without
+activity. Batches go out every 10 seconds, and by beacon when the page is
+hidden.
+
+Turn it off in one app whatever the project says:
+
+```ts
+Errorgap.init({ /* ... */, replay: false });
+```
+
+### DOM snapshots
+
+When the project captures snapshots, the SDK takes a static HTML copy of the
+page on the trigger the project chose (on error, or on rage click), or when
+you call:
+
+```ts
+Errorgap.captureSnapshot(); // true when one was taken
+```
+
+Snapshots are masked in the browser before anything is sent:
+
+- every `input`, `textarea` and `select` value is blanked, and choices are unchecked;
+- `script`, `iframe`, `object`, `embed` and every `on*` handler and `javascript:` URL are removed;
+- elements marked `data-errorgap-block` are removed;
+- text inside `data-errorgap-mask` is replaced with `•`.
+
+```html
+<section data-errorgap-mask>Ana Lee, 12 Rua Augusta</section>
+<div data-errorgap-block><!-- never leaves the browser --></div>
+```
+
+Snapshots over 1 MiB are skipped.
 
 ## Graceful flush
 
