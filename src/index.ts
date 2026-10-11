@@ -4,6 +4,7 @@ import { installGlobalHandlers, uninstallGlobalHandlers } from "./handlers.js";
 import type { NoticeContext } from "./notice.js";
 import { configureRuntime, runtimeState } from "./runtime.js";
 import { startPerformance, stopPerformance, type PerformanceOptions } from "./performance.js";
+import { captureReplaySnapshot, startReplay, stopReplay, type ReplayOptions } from "./replay/index.js";
 import { VERSION } from "./version.js";
 
 export type { ConfigurationInput, Logger } from "./configuration.js";
@@ -11,6 +12,7 @@ export type { NoticeContext, NoticePayload } from "./notice.js";
 export type { BacktraceFrame } from "./backtrace.js";
 export type { DeliveryResult } from "./client.js";
 export type { PerformanceOptions, PageViewTiming, RequestTiming } from "./performance.js";
+export type { ReplayOptions } from "./replay/index.js";
 export { Configuration } from "./configuration.js";
 export { Client } from "./client.js";
 export { VERSION };
@@ -26,10 +28,17 @@ export interface InitOptions extends ConfigurationInput {
    * calls. `true` for the defaults, or options. Off by default.
    */
   performance?: boolean | PerformanceOptions;
+  /**
+   * Session replay. On by default, but it records only what the project's
+   * replay settings allow (Settings → Session replay): nothing while replay is
+   * off there, and a sampled share of sessions while it is on. `false` turns
+   * it off in this app whatever the settings say.
+   */
+  replay?: boolean | ReplayOptions;
 }
 
 function init(options: InitOptions = {}): void {
-  const { captureGlobals = true, performance = false, ...rest } = options;
+  const { captureGlobals = true, performance = false, replay = true, ...rest } = options;
   const { client, configuration } = configureRuntime(new Configuration(rest));
   if (captureGlobals) {
     installGlobalHandlers(client);
@@ -48,6 +57,27 @@ function init(options: InitOptions = {}): void {
   } else {
     stopPerformance();
   }
+  if (replay) {
+    try {
+      configuration.validate();
+      startReplay(configuration, replay === true ? {} : replay);
+    } catch (error) {
+      configuration.logger?.warn(
+        `[errorgap] session replay not started: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  } else {
+    stopReplay();
+  }
+}
+
+/**
+ * Take a DOM snapshot for session replay now (inputs blanked, `data-errorgap-*`
+ * masking applied). Only when this session is being recorded and the project
+ * captures snapshots; returns whether one was taken.
+ */
+function captureSnapshot(): boolean {
+  return captureReplaySnapshot();
 }
 
 function notify(
@@ -75,7 +105,8 @@ export const Errorgap = {
   flush,
   configuration: getConfiguration,
   client: getClient,
+  captureSnapshot,
   VERSION,
 };
 
-export { init, notify, flush };
+export { init, notify, flush, captureSnapshot };

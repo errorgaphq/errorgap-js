@@ -43,6 +43,7 @@ describe("ErrorgapBoundary", () => {
       apiKey: "flk_test",
       async: false,
       captureGlobals: false,
+      replay: false,
     });
   });
 

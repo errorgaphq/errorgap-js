@@ -1,6 +1,7 @@
 import type { Configuration } from "./configuration.js";
 import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js";
 import { enrichBacktrace } from "./source-maps.js";
+import { replayErrorStarted } from "./replay/index.js";
 import { VERSION } from "./version.js";
 
 export interface DeliveryResult {
@@ -26,13 +27,20 @@ export class Client {
   ): Promise<DeliveryResult> {
     try {
       this.configuration.validate();
+      const err = coerceError(error);
+      // The session replay timeline shows every error, sampled out or not;
+      // a delivered one is linked to its error group.
+      const replayDone = replayErrorStarted(`${err.name || "Error"}: ${err.message}`);
       if (!shouldSample(this.configuration.sampleRate)) {
+        replayDone();
         return { sampled: true };
       }
-      const err = coerceError(error);
       const notice = buildNotice(err, this.configuration, options);
       const configuration = this.configuration;
-      const operation = this.prepareAndDeliver(notice, configuration);
+      const operation = this.prepareAndDeliver(notice, configuration).then((result) => {
+        replayDone(groupIdOf(result));
+        return result;
+      });
       this.track(operation);
 
       if (options.sync || !this.configuration.async) {
@@ -109,6 +117,16 @@ export class Client {
         ? `${exception.name}: ${exception.message}`
         : String(exception);
     logger.warn(`[errorgap] ${message}`);
+  }
+}
+
+function groupIdOf(result: DeliveryResult): string | undefined {
+  if (!result.body) return undefined;
+  try {
+    const parsed = JSON.parse(result.body) as { group_id?: unknown };
+    return typeof parsed.group_id === "string" ? parsed.group_id : undefined;
+  } catch {
+    return undefined;
   }
 }
 
