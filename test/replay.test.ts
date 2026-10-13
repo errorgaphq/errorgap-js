@@ -3,7 +3,7 @@ import { Errorgap } from "../src/index.js";
 import { describeAgent } from "../src/replay/agent.js";
 import { IDLE_TIMEOUT_MS, currentSession, clearSession } from "../src/replay/session.js";
 import { serializeSnapshot } from "../src/replay/snapshot.js";
-import { RAGE_CLICKS } from "../src/replay/recorder.js";
+import { MAX_PENDING_EVENTS, RAGE_CLICKS } from "../src/replay/recorder.js";
 
 interface Sent {
   url: string;
@@ -101,16 +101,21 @@ describe("session replay", () => {
     expect(sessionBatches(sent)).toHaveLength(0);
   });
 
-  it("reads the settings with the key in the query, then sends the page load with the key header", async () => {
+  it("reads the settings with the key in the query, and sends the session with the key header once it has an error", async () => {
     const sent = fakeServer({});
     init();
     await settle();
 
     expect(sent[0]!.url).toBe(`${ENDPOINT}/api/projects/shop/sessions/config?api_key=egp_key`);
+    expect(sessionBatches(sent)).toHaveLength(0);
+
+    await Errorgap.notify(new Error("boom"), { sync: true });
+    await settle();
     const [batch] = sessionBatches(sent);
     expect(batch!.headers["x-errorgap-project-key"]).toBe("egp_key");
-    expect(batch!.body.session).toMatchObject({ outcome: "abandoned", device: expect.any(String) });
-    expect(batch!.body.events).toEqual([{ t: 0, type: "page_load", label: "Loaded /checkout" }]);
+    expect(batch!.body.session).toMatchObject({ outcome: "error", device: expect.any(String) });
+    expect(batch!.body.events[0]).toEqual({ t: 0, type: "page_load", label: "Loaded /checkout" });
+    expect(batch!.body.events.map((e: { type: string }) => e.type)).toContain("error");
   });
 
   it("records navigations and failed API calls, not its own uploads", async () => {
@@ -121,6 +126,7 @@ describe("session replay", () => {
     window.history.pushState(null, "", "/cart?step=2");
     window.history.pushState(null, "", "/cart?step=3"); // same path: not a navigation
     await fetch("/api/orders/7?token=secret", { method: "post" });
+    await Errorgap.notify(new Error("order failed"), { sync: true });
     window.dispatchEvent(new Event("pagehide"));
     await settle();
 
@@ -180,6 +186,7 @@ describe("session replay", () => {
 
     const el = document.getElementById("promo")!;
     for (let i = 0; i < RAGE_CLICKS + 2; i++) el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await Errorgap.notify(new Error("promo failed"), { sync: true });
     window.dispatchEvent(new Event("pagehide"));
     await settle();
 
@@ -200,6 +207,8 @@ describe("session replay", () => {
     });
     init();
     await settle();
+    await Errorgap.notify(new Error("boom"), { sync: true });
+    await settle();
     window.dispatchEvent(new Event("pagehide"));
     await settle();
 
@@ -207,7 +216,8 @@ describe("session replay", () => {
     expect(beacons[0]!.url).toBe(`${ENDPOINT}/api/projects/shop/sessions?api_key=egp_key`);
     const body = JSON.parse(beacons[0]!.body);
     expect(body.events[body.events.length - 1]).toMatchObject({ type: "exit", label: "Left /checkout" });
-    expect(body.session.outcome).toBe("completed");
+    expect(body.session.outcome).toBe("error");
+    // The error went up by fetch; only the exit rode the beacon.
     expect(sent.filter((s) => s.method === "POST" && s.url.endsWith("/sessions"))).toHaveLength(1);
   });
 
@@ -220,6 +230,52 @@ describe("session replay", () => {
 
     expect(sent.filter((s) => s.url.includes("/sessions/config"))).toHaveLength(1);
     expect(sessionBatches(sent)).toHaveLength(0);
+  });
+
+  it("sends nothing for a session that never has an error", async () => {
+    const sent = fakeServer({});
+    init();
+    await settle();
+    window.history.pushState(null, "", "/cart");
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("pagehide"));
+    await settle();
+
+    expect(sessionBatches(sent)).toHaveLength(0);
+  });
+
+  it("carries the pages before an error into the session", async () => {
+    const sent = fakeServer({});
+    init();
+    await settle();
+    window.dispatchEvent(new Event("pagehide")); // leaving /checkout, no error yet
+
+    (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL("http://localhost:3000/pay");
+    init(); // the next page in the same tab
+    await settle();
+    expect(sessionBatches(sent)).toHaveLength(0);
+
+    await Errorgap.notify(new Error("payment failed"), { sync: true });
+    await settle();
+    const labels = events(sent).map((e) => `${e.type}:${e.label}`);
+    expect(labels.slice(0, 3)).toEqual(["page_load:Loaded /checkout", "exit:Left /checkout", "page_load:Loaded /pay"]);
+    expect(labels).toContain("error:Error: payment failed");
+    expect(new Set(sessionBatches(sent).map((b) => b.body.session.id)).size).toBe(1);
+  });
+
+  it("holds only the most recent events before an error", async () => {
+    const sent = fakeServer({});
+    init();
+    await settle();
+    for (let i = 0; i < MAX_PENDING_EVENTS + 50; i++) window.history.pushState(null, "", `/item/${i}`);
+    await Errorgap.notify(new Error("boom"), { sync: true });
+    await settle();
+
+    const all = events(sent);
+    const before = all.filter((e) => e.type !== "error");
+    expect(before).toHaveLength(MAX_PENDING_EVENTS);
+    expect(before[0]!.label).toBe("Navigated to /item/50");
+    expect(before.some((e) => e.type === "page_load")).toBe(false);
   });
 
   it("can be turned off in the app", async () => {

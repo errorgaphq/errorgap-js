@@ -185,8 +185,14 @@ Whether anything is recorded is set per project in **Settings → Session
 replay**, not in code. The SDK reads those settings once per browser-tab
 session: nothing is recorded while replay is off, and a sampled share of
 sessions is recorded while it is on. A session ends after 30 minutes without
-activity. Batches go out every 10 seconds, and by beacon when the page is
-hidden.
+activity.
+
+**Only sessions that hit an error are kept.** Until an error is reported, the
+SDK holds the session's most recent 300 events in the browser (in
+`sessionStorage`, so earlier pages in the tab count) and sends nothing. When
+an error is reported, everything held is sent with it, and the rest of the
+session follows in batches every 10 seconds and by beacon when the page is
+hidden. A session that ends without an error is never sent.
 
 Turn it off in one app whatever the project says:
 

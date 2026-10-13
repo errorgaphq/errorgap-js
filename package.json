@@ -1,6 +1,6 @@
 {
   "name": "@errorgap/browser",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Browser notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
