@@ -1,7 +1,15 @@
 import type { Configuration } from "../configuration.js";
 import { pathOf, requestUrl } from "../performance.js";
 import { describeAgent, type AgentInfo } from "./agent.js";
-import { currentSession, save, type RecordingDecision, type ReplaySession } from "./session.js";
+import {
+  clearBuffer,
+  currentSession,
+  save,
+  saveBuffer,
+  takeBuffer,
+  type RecordingDecision,
+  type ReplaySession,
+} from "./session.js";
 import { serializeSnapshot } from "./snapshot.js";
 
 /**
@@ -13,6 +21,12 @@ import { serializeSnapshot } from "./snapshot.js";
  * Whether anything is recorded is the project's call: the recorder reads the
  * project's replay settings once per session and records a sampled share of
  * sessions only while replay is on.
+ *
+ * Only sessions that hit an error are kept. A sampled session's events are
+ * held (across page loads, in `sessionStorage`) and nothing is sent until an
+ * error is reported; then everything held goes up, and the rest of the
+ * session is sent as it happens. A session that ends without an error is
+ * never sent.
  */
 export interface ReplayOptions {
   /** How often recorded events are sent, in ms. Defaults to 10 000. */
@@ -39,6 +53,8 @@ type State = "pending" | "recording" | "off";
 export const MAX_BATCH_EVENTS = 200;
 /** Events held while the project's settings are being read, or while offline. */
 const MAX_BUFFERED_EVENTS = 1000;
+/** Before the first error, only the most recent events are held. */
+export const MAX_PENDING_EVENTS = 300;
 const MAX_LABEL = 200;
 export const RAGE_CLICKS = 5;
 export const RAGE_WINDOW_MS = 2000;
@@ -82,6 +98,7 @@ export class ReplayRecorder {
     this.session = currentSession();
     this.agent = describeAgent();
     this.lastPath = location.pathname;
+    if (!this.session.hadError) this.events = takeBuffer<ReplayEvent>(this.session.id);
     this.push({ type: "page_load", label: `Loaded ${location.pathname}` });
     this.watchNavigations();
     this.watchRequests();
@@ -136,6 +153,12 @@ export class ReplayRecorder {
   /** Send what is recorded. `final` is the page going away: use a beacon. */
   flush(final: boolean): void {
     if (this.state !== "recording") return;
+    if (!this.session.hadError) {
+      // No error yet: hold everything for the next page instead.
+      saveBuffer(this.session.id, this.events);
+      return;
+    }
+    clearBuffer();
     do {
       const events = this.events.splice(0, MAX_BATCH_EVENTS);
       const sentOffsets = new Set(events.map((e) => e.t));
@@ -183,6 +206,7 @@ export class ReplayRecorder {
       this.stop();
       this.events = [];
       this.snapshots = [];
+      clearBuffer();
       return;
     }
     if (!decision.captureSnaps) {
@@ -207,6 +231,11 @@ export class ReplayRecorder {
 
   private push(event: Omit<ReplayEvent, "t"> & { t?: number }): void {
     if (this.state === "off") return;
+    if (!this.session.hadError && this.events.length >= MAX_PENDING_EVENTS) {
+      // Before an error, the recent past matters most: drop the oldest.
+      const dropped = this.events.shift()!;
+      if (dropped.has_snap) this.snapshots = this.snapshots.filter((s) => s.t !== dropped.t);
+    }
     if (this.events.length >= MAX_BUFFERED_EVENTS) return;
     this.events.push({ ...event, t: event.t ?? this.offset(), label: trim(event.label) });
     this.session.lastActivity = Date.now();

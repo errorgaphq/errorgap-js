@@ -6,6 +6,8 @@
 
 export const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const STORAGE_KEY = "errorgap:replay-session";
+/** Events recorded before the session's first error, carried across page loads. */
+const BUFFER_KEY = "errorgap:replay-buffer";
 
 /** The recording decision, made once per session from the project's settings. */
 export interface RecordingDecision {
@@ -33,7 +35,42 @@ export function currentSession(now: number = Date.now()): ReplaySession {
   }
   const session: ReplaySession = { id: uuid(), startedAt: now, lastActivity: now, hadError: false };
   save(session);
+  clearBuffer();
   return session;
+}
+
+/**
+ * Hold a session's events until it has an error: only sessions with one are
+ * kept, so nothing is sent before then. Kept in `sessionStorage` so the pages
+ * before the error are part of the replay.
+ */
+export function saveBuffer<T>(sessionId: string, events: T[]): void {
+  try {
+    sessionStorage.setItem(BUFFER_KEY, JSON.stringify({ id: sessionId, events }));
+  } catch {
+    // Storage full or blocked: this page's events only.
+  }
+}
+
+/** The held events for this session, removed from storage. */
+export function takeBuffer<T>(sessionId: string): T[] {
+  try {
+    const raw = sessionStorage.getItem(BUFFER_KEY);
+    sessionStorage.removeItem(BUFFER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { id?: unknown; events?: unknown };
+    return parsed.id === sessionId && Array.isArray(parsed.events) ? (parsed.events as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function clearBuffer(): void {
+  try {
+    sessionStorage.removeItem(BUFFER_KEY);
+  } catch {
+    // Nothing to clear.
+  }
 }
 
 export function save(session: ReplaySession): void {
@@ -50,6 +87,7 @@ export function clearSession(): void {
   } catch {
     // Nothing to clear.
   }
+  clearBuffer();
 }
 
 function read(): ReplaySession | undefined {
