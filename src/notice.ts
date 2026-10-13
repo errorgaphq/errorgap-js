@@ -1,9 +1,19 @@
 import type { Configuration } from "./configuration.js";
 import { parseBacktrace, type BacktraceFrame } from "./backtrace.js";
-import { filterParams } from "./filter.js";
+import { cleanRecord, filterParams, truncateString } from "./filter.js";
 import { VERSION } from "./version.js";
 
+/** Who was using the page; sent as `session.user_id` / `session.user_email`. */
+export interface NoticeUser {
+  id?: string | number;
+  email?: string;
+}
+
+const MAX_CAUSE_DEPTH = 10;
+const MAX_MESSAGE_LENGTH = 8192;
+
 export interface NoticeContext {
+  user?: NoticeUser | null;
   context?: Record<string, unknown>;
   environment?: Record<string, unknown>;
   session?: Record<string, unknown>;
@@ -29,31 +39,65 @@ export function buildNotice(
   configuration: Configuration,
   options: NoticeContext = {},
 ): NoticePayload {
+  const chain = errorChain(error);
+  const causes = chain.slice(1).map((link) => ({ type: errorType(link), message: message(link) }));
+
+  // Each cause's frames follow the error's own, re-indexed, so the
+  // dashboard renders the whole chain as one backtrace.
+  const backtrace: BacktraceFrame[] = [];
+  for (const link of chain) {
+    for (const frame of parseBacktrace(link)) {
+      backtrace.push({ ...frame, index: backtrace.length });
+    }
+  }
+
   return {
     project_id: configuration.projectId,
     received_at: new Date().toISOString(),
-    errors: [
-      {
-        type: errorType(error),
-        message: String(error.message ?? ""),
-        backtrace: parseBacktrace(error),
-      },
-    ],
+    errors: [{ type: errorType(error), message: message(error), backtrace }],
     context: {
       notifier: "errorgap-browser",
       notifier_version: VERSION,
       environment: configuration.environment,
       release: configuration.release,
       ...browserContext(),
-      ...(options.context ?? {}),
+      ...(causes.length > 0 ? { causes } : {}),
+      ...cleanRecord(options.context),
     },
     environment: {
       ...browserEnvironment(),
-      ...(options.environment ?? {}),
+      ...cleanRecord(options.environment),
     },
-    session: options.session ?? {},
+    session: filterParams(
+      { ...userSession(options.user), ...(options.session ?? {}) },
+      configuration.filterKeys,
+    ),
     params: filterParams(options.params ?? {}, configuration.filterKeys),
   };
+}
+
+function userSession(user: NoticeUser | null | undefined): Record<string, unknown> {
+  const session: Record<string, unknown> = {};
+  if (user?.id !== undefined && user.id !== null && String(user.id) !== "") session.user_id = String(user.id);
+  if (user?.email) session.user_email = String(user.email);
+  return session;
+}
+
+/** The error, then its `cause`, then that one's, without looping. */
+function errorChain(error: Error): Error[] {
+  const chain: Error[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current instanceof Error && !seen.has(current) && chain.length < MAX_CAUSE_DEPTH) {
+    seen.add(current);
+    chain.push(current);
+    current = (current as { cause?: unknown }).cause;
+  }
+  return chain.length > 0 ? chain : [error];
+}
+
+function message(error: Error): string {
+  return truncateString(String(error.message ?? ""), MAX_MESSAGE_LENGTH);
 }
 
 function browserContext(): Record<string, unknown> {

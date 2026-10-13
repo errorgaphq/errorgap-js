@@ -3,19 +3,40 @@ import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js
 import { enrichBacktrace } from "./source-maps.js";
 import { replayErrorStarted } from "./replay/index.js";
 import { VERSION } from "./version.js";
+import { Delivery, type DeliveryResult as SendResult } from "./delivery.js";
+import { Deduper, isNoise } from "./noise.js";
+import type { NoticeUser } from "./notice.js";
 
-export interface DeliveryResult {
-  status?: number;
-  body?: string;
-  error?: unknown;
-  queued?: boolean;
+export interface DeliveryResult extends SendResult {
   sampled?: boolean;
+  /** Not sent: `noise`, `duplicate`, `beforeNotify` or `environment`. */
+  dropped?: string;
 }
 
 export class Client {
   private pending = new Set<Promise<unknown>>();
+  private deduper = new Deduper();
+  private user: NoticeUser | null = null;
+  private onlineListening = false;
+  private delivery = new Delivery(() => ({
+    endpoint: this.configuration.endpoint,
+    projectSlug: this.configuration.projectSlug,
+    apiKey: this.configuration.apiKey,
+    timeout: this.configuration.timeout,
+    queueSize: this.configuration.queueSize,
+    userAgent: `errorgap-browser/${VERSION}`,
+    warn: (message) => this.configuration.logger?.warn(message),
+    // keepalive lets a notice sent during unload finish; credentials are
+    // never needed, the project key authenticates.
+    fetchInit: { keepalive: true, credentials: "omit" },
+  }));
 
   constructor(private configuration: Configuration) {}
+
+  /** Name the signed-in user on every later notice; `null` clears it. */
+  setUser(user: NoticeUser | null): void {
+    this.user = user;
+  }
 
   configure(configuration: Configuration): void {
     this.configuration = configuration;
@@ -25,30 +46,51 @@ export class Client {
     error: unknown,
     options: NoticeContext & { sync?: boolean } = {},
   ): Promise<DeliveryResult> {
+    // Tracked from the first moment, so `flush()` right after `notify()`
+    // waits for the notice even while it is still being prepared.
+    const operation = this.process(error, options);
+    this.track(operation);
+    if (options.sync || !this.configuration.async) return operation;
+
+    const early = await Promise.race([operation, Promise.resolve(undefined)]);
+    return early ?? { queued: true, status: 202 };
+  }
+
+  private async process(error: unknown, options: NoticeContext): Promise<DeliveryResult> {
+    let replayDone: (groupId?: string) => void = () => undefined;
     try {
       this.configuration.validate();
+      if (this.configuration.ignoreEnvironments.includes(this.configuration.environment)) {
+        return { status: 202, dropped: "environment" };
+      }
+      this.watchConnection();
       const err = coerceError(error);
       // The session replay timeline shows every error, sampled out or not;
       // a delivered one is linked to its error group.
-      const replayDone = replayErrorStarted(`${err.name || "Error"}: ${err.message}`);
+      replayDone = replayErrorStarted(`${err.name || "Error"}: ${err.message}`);
       if (!shouldSample(this.configuration.sampleRate)) {
         replayDone();
         return { sampled: true };
       }
-      const notice = buildNotice(err, this.configuration, options);
-      const configuration = this.configuration;
-      const operation = this.prepareAndDeliver(notice, configuration).then((result) => {
-        replayDone(groupIdOf(result));
-        return result;
-      });
-      this.track(operation);
-
-      if (options.sync || !this.configuration.async) {
-        return await operation;
+      const built = buildNotice(err, this.configuration, { user: this.user, ...options });
+      if (this.configuration.ignoreNoise && isNoise(built)) {
+        replayDone();
+        return { status: 202, dropped: "noise" };
       }
-
-      return { queued: true, status: 202 };
+      if (this.deduper.duplicate(built, this.configuration.dedupeWindowMs)) {
+        replayDone();
+        return { status: 202, dropped: "duplicate" };
+      }
+      const notice = await this.runHook(built);
+      if (!notice) {
+        replayDone();
+        return { status: 202, dropped: "beforeNotify" };
+      }
+      const result = await this.prepareAndDeliver(notice, this.configuration);
+      replayDone(groupIdOf(result));
+      return result;
     } catch (exception) {
+      replayDone();
       this.log(exception);
       return { error: exception };
     }
@@ -56,33 +98,36 @@ export class Client {
 
   async deliver(
     notice: NoticePayload,
-    configuration: Configuration = this.configuration,
+    _configuration: Configuration = this.configuration,
   ): Promise<DeliveryResult> {
-    const url = noticesUrl(configuration);
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      "user-agent": `errorgap-browser/${VERSION}`,
-    };
-    if (configuration.apiKey) {
-      headers["x-errorgap-project-key"] = configuration.apiKey;
-    }
+    return this.delivery.send("notices", notice);
+  }
 
+  /**
+   * A hook that throws is logged and skipped: a bug in a filter must not
+   * lose the error it was filtering.
+   */
+  private async runHook(notice: NoticePayload): Promise<NoticePayload | null> {
+    const hook = this.configuration.beforeNotify;
+    if (!hook) return notice;
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(notice),
-        // Browsers strip Origin → server CORS must allow it; SDK assumes endpoint
-        // accepts cross-origin requests with these headers.
-        keepalive: true,
-        credentials: "omit",
-      });
-      const body = await safeBody(response);
-      return { status: response.status, body };
+      const result = await hook(notice);
+      if (result === false || result === null) return null;
+      return result && typeof result === "object" && Array.isArray(result.errors) ? result : notice;
     } catch (exception) {
       this.log(exception);
-      return { error: exception };
+      return notice;
     }
+  }
+
+  /** While the browser is offline notices wait in the queue; they go out when it is back. */
+  private watchConnection(): void {
+    if (this.onlineListening || typeof window === "undefined") return;
+    if (typeof window.addEventListener !== "function") return;
+    this.onlineListening = true;
+    window.addEventListener("offline", () => this.delivery.hold(true));
+    window.addEventListener("online", () => this.delivery.hold(false));
+    if (typeof navigator !== "undefined" && navigator.onLine === false) this.delivery.hold(true);
   }
 
   async flush(): Promise<void> {

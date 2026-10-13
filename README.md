@@ -65,6 +65,36 @@ try {
 `{ error }` on failure, `{ queued: true, status: 202 }` in async mode,
 `{ sampled: true }` if dropped by `sampleRate`). The SDK never throws.
 
+## Noise, duplicates and filtering
+
+Out of the box the SDK does not send errors you can do nothing about:
+cross-origin `Script error.` (a third-party script loaded without CORS),
+errors thrown by browser extensions and `ResizeObserver loop` notices
+(`ignoreNoise: false` to send them). An identical error is sent at most once
+a second (`dedupeWindowMs`), so one thrown on every frame cannot flood your
+project.
+
+```ts
+Errorgap.init({
+  filterKeys: ["password", "token", /^ssn$/],
+  beforeNotify(notice) {
+    if (notice.errors[0]?.message.includes("Load failed")) return false; // drop it
+    notice.context.plan = currentPlan();                                   // or change it
+  },
+});
+
+Errorgap.setUser({ id: user.id, email: user.email }); // null on sign-out
+```
+
+`filterKeys` are masked at any depth in `params` and `session`; values that
+cannot be serialized are cut rather than losing the notice. An error's `cause`
+chain is reported with it.
+
+Notices wait in a small queue (`queueSize`, default 30) while the browser is
+offline and go out when it is back. A send that fails on the network or with a
+5xx is retried up to three times, each request times out after `timeout`
+seconds, and after a 429 the SDK stops sending for the server's `Retry-After`.
+
 ## React
 
 ```tsx
