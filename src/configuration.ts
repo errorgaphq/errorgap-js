@@ -3,6 +3,17 @@ export interface Logger {
   error?(message: string, ...args: unknown[]): void;
 }
 
+import type { FilterKey } from "./filter.js";
+import type { NoticePayload } from "./notice.js";
+
+/**
+ * Sees each notice before it is sent. Change it in place or return a
+ * replacement; return `false` or `null` to drop it.
+ */
+export type BeforeNotify = (
+  notice: NoticePayload,
+) => NoticePayload | false | null | void | Promise<NoticePayload | false | null | void>;
+
 export interface ConfigurationInput {
   endpoint?: string;
   projectSlug?: string;
@@ -12,7 +23,32 @@ export interface ConfigurationInput {
   release?: string;
   async?: boolean;
   logger?: Logger | null;
-  filterKeys?: string[];
+  /** Substrings (case-insensitive) or regexps; matching keys are masked at any depth. */
+  filterKeys?: FilterKey[];
+  beforeNotify?: BeforeNotify;
+  /**
+   * Follow the project's settings in errorgap (Project settings › What SDKs
+   * send): stop sending what is switched off there. Defaults to true.
+   */
+  remoteSettings?: boolean;
+  /**
+   * Drop errors the page can do nothing about: cross-origin `Script error.`,
+   * errors thrown by browser extensions and benign `ResizeObserver loop`
+   * warnings. Defaults to true.
+   */
+  ignoreNoise?: boolean;
+  /**
+   * An identical error (same type, message and top frame) is sent at most
+   * once in this many milliseconds, so an error thrown in a loop or on every
+   * frame cannot flood the project. Defaults to 1000; 0 turns it off.
+   */
+  dedupeWindowMs?: number;
+  /** Environments in which nothing is sent. */
+  ignoreEnvironments?: string[];
+  /** Seconds allowed for each request to errorgap. Default 5. */
+  timeout?: number;
+  /** Notices held for sending (also while offline); the oldest is dropped when full. Default 30. */
+  queueSize?: number;
   sampleRate?: number;
   /** Resolve browser stack frames through deployed source maps. Defaults to true. */
   sourceMaps?: boolean;
@@ -23,6 +59,12 @@ export interface ConfigurationInput {
    */
   ignoreOrigins?: string[];
 }
+
+// On unless ERRORGAP_REMOTE_SETTINGS=false (where there is an environment
+// to read: tests and server-side rendering).
+const REMOTE_SETTINGS_DEFAULT =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.ERRORGAP_REMOTE_SETTINGS !== "false";
 
 const DEFAULT_FILTER_KEYS = [
   "password",
@@ -43,7 +85,14 @@ export class Configuration {
   release: string | undefined;
   async: boolean;
   logger: Logger | null;
-  filterKeys: string[];
+  filterKeys: FilterKey[];
+  beforeNotify: BeforeNotify | undefined;
+  remoteSettings: boolean;
+  ignoreNoise: boolean;
+  dedupeWindowMs: number;
+  ignoreEnvironments: string[];
+  timeout: number;
+  queueSize: number;
   sampleRate: number;
   sourceMaps: boolean;
   ignoreOrigins: string[];
@@ -58,6 +107,13 @@ export class Configuration {
     this.async = input.async ?? true;
     this.logger = input.logger === undefined ? safeConsole() : input.logger;
     this.filterKeys = input.filterKeys ?? [...DEFAULT_FILTER_KEYS];
+    this.beforeNotify = input.beforeNotify;
+    this.remoteSettings = input.remoteSettings ?? REMOTE_SETTINGS_DEFAULT;
+    this.ignoreNoise = input.ignoreNoise ?? true;
+    this.dedupeWindowMs = input.dedupeWindowMs ?? 1000;
+    this.ignoreEnvironments = input.ignoreEnvironments ?? [];
+    this.timeout = input.timeout ?? 5;
+    this.queueSize = input.queueSize ?? 30;
     this.sampleRate = clampRate(input.sampleRate);
     this.sourceMaps = input.sourceMaps ?? true;
     this.ignoreOrigins = input.ignoreOrigins ?? [];

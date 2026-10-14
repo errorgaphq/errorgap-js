@@ -44,6 +44,8 @@ describe("ErrorgapBoundary", () => {
       async: false,
       captureGlobals: false,
       replay: false,
+      // Both tests throw the same error within a second.
+      dedupeWindowMs: 0,
     });
   });
 

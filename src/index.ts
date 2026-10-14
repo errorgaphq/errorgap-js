@@ -1,14 +1,15 @@
 import { Configuration, type ConfigurationInput } from "./configuration.js";
 import { Client, type DeliveryResult } from "./client.js";
 import { installGlobalHandlers, uninstallGlobalHandlers } from "./handlers.js";
-import type { NoticeContext } from "./notice.js";
+import type { NoticeContext, NoticeUser } from "./notice.js";
 import { configureRuntime, runtimeState } from "./runtime.js";
 import { startPerformance, stopPerformance, type PerformanceOptions } from "./performance.js";
 import { captureReplaySnapshot, startReplay, stopReplay, type ReplayOptions } from "./replay/index.js";
 import { VERSION } from "./version.js";
 
-export type { ConfigurationInput, Logger } from "./configuration.js";
-export type { NoticeContext, NoticePayload } from "./notice.js";
+export type { BeforeNotify, ConfigurationInput, Logger } from "./configuration.js";
+export type { NoticeContext, NoticePayload, NoticeUser } from "./notice.js";
+export type { FilterKey } from "./filter.js";
 export type { BacktraceFrame } from "./backtrace.js";
 export type { DeliveryResult } from "./client.js";
 export type { PerformanceOptions, PageViewTiming, RequestTiming } from "./performance.js";
@@ -87,6 +88,14 @@ function notify(
   return runtimeState().client.notify(error, options);
 }
 
+/**
+ * Name the signed-in user on every later notice (`session.user_id`,
+ * `session.user_email`). Call with `null` on sign-out.
+ */
+function setUser(user: NoticeUser | null): void {
+  runtimeState().client.setUser(user);
+}
+
 function flush(): Promise<void> {
   return runtimeState().client.flush();
 }
@@ -102,6 +111,7 @@ function getClient(): Client {
 export const Errorgap = {
   init,
   notify,
+  setUser,
   flush,
   configuration: getConfiguration,
   client: getClient,
@@ -109,4 +119,4 @@ export const Errorgap = {
   VERSION,
 };
 
-export { init, notify, flush, captureSnapshot };
+export { init, notify, setUser, flush, captureSnapshot };
