@@ -27,6 +27,11 @@ export interface ConfigurationInput {
   filterKeys?: FilterKey[];
   beforeNotify?: BeforeNotify;
   /**
+   * Follow the project's settings in errorgap (Project settings › What SDKs
+   * send): stop sending what is switched off there. Defaults to true.
+   */
+  remoteSettings?: boolean;
+  /**
    * Drop errors the page can do nothing about: cross-origin `Script error.`,
    * errors thrown by browser extensions and benign `ResizeObserver loop`
    * warnings. Defaults to true.
@@ -55,6 +60,12 @@ export interface ConfigurationInput {
   ignoreOrigins?: string[];
 }
 
+// On unless ERRORGAP_REMOTE_SETTINGS=false (where there is an environment
+// to read: tests and server-side rendering).
+const REMOTE_SETTINGS_DEFAULT =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.ERRORGAP_REMOTE_SETTINGS !== "false";
+
 const DEFAULT_FILTER_KEYS = [
   "password",
   "password_confirmation",
@@ -76,6 +87,7 @@ export class Configuration {
   logger: Logger | null;
   filterKeys: FilterKey[];
   beforeNotify: BeforeNotify | undefined;
+  remoteSettings: boolean;
   ignoreNoise: boolean;
   dedupeWindowMs: number;
   ignoreEnvironments: string[];
@@ -96,6 +108,7 @@ export class Configuration {
     this.logger = input.logger === undefined ? safeConsole() : input.logger;
     this.filterKeys = input.filterKeys ?? [...DEFAULT_FILTER_KEYS];
     this.beforeNotify = input.beforeNotify;
+    this.remoteSettings = input.remoteSettings ?? REMOTE_SETTINGS_DEFAULT;
     this.ignoreNoise = input.ignoreNoise ?? true;
     this.dedupeWindowMs = input.dedupeWindowMs ?? 1000;
     this.ignoreEnvironments = input.ignoreEnvironments ?? [];

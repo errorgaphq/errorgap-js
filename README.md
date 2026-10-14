@@ -95,6 +95,15 @@ offline and go out when it is back. A send that fails on the network or with a
 5xx is retried up to three times, each request times out after `timeout`
 seconds, and after a 429 the SDK stops sending for the server's `Retry-After`.
 
+## Remote settings
+
+Errors, performance data and logs can each be switched off for a project in
+errorgap (Project settings › What SDKs send). Running apps follow within ten
+minutes, with no deploy or release: the SDK re-reads
+`GET /api/projects/:slug/config` in the background. If errorgap cannot be
+reached, everything stays on. `remoteSettings: false` ignores the project's
+switches.
+
 ## React
 
 ```tsx

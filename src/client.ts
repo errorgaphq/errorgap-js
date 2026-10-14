@@ -1,4 +1,5 @@
 import type { Configuration } from "./configuration.js";
+import { RemoteSettings } from "./remote-settings.js";
 import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js";
 import { enrichBacktrace } from "./source-maps.js";
 import { replayErrorStarted } from "./replay/index.js";
@@ -18,6 +19,8 @@ export class Client {
   private deduper = new Deduper();
   private user: NoticeUser | null = null;
   private onlineListening = false;
+  /** What errorgap wants this app to send (the project's remote settings). */
+  readonly remote = new RemoteSettings(() => this.configuration);
   private delivery = new Delivery(() => ({
     endpoint: this.configuration.endpoint,
     projectSlug: this.configuration.projectSlug,
@@ -63,6 +66,7 @@ export class Client {
       if (this.configuration.ignoreEnvironments.includes(this.configuration.environment)) {
         return { status: 202, dropped: "environment" };
       }
+      if (!this.remote.enabled("errors")) return { status: 202, dropped: "remote settings" };
       this.watchConnection();
       const err = coerceError(error);
       // The session replay timeline shows every error, sampled out or not;
